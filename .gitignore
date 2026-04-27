@@ -1,0 +1,26 @@
+﻿# Python
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+
+# Local database / uploads
+backend/app/*.sqlite3
+backend/app/uploads/
+backend/uploads/
+
+# Local env files
+.env
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# Backups / checkpoints
+backups/
+checkpoints/
+
+# Old extra folder
+I-Am-The-One-V3/
