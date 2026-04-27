@@ -1,6 +1,7 @@
 ﻿# Copyright © 2026 Andrew Wolverton. All Rights Reserved.
 from __future__ import annotations
 
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from app.routes.auth import require_admin
 from app.routes.catalog import connect, init_db as init_catalog_db, row_to_dict
 
 orders_bp = Blueprint("orders", __name__)
@@ -15,6 +17,18 @@ orders_bp = Blueprint("orders", __name__)
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def new_upload_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def ensure_column(con: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    cols = con.execute(f"PRAGMA table_info({table})").fetchall()
+    existing = {row["name"] for row in cols}
+
+    if column not in existing:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
 
 def init_orders_db() -> None:
@@ -28,10 +42,13 @@ def init_orders_db() -> None:
                 id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'paid',
-                total_cents INTEGER NOT NULL DEFAULT 0
+                total_cents INTEGER NOT NULL DEFAULT 0,
+                upload_token TEXT NOT NULL DEFAULT ''
             )
             """
         )
+
+        ensure_column(con, "orders", "upload_token", "upload_token TEXT NOT NULL DEFAULT ''")
 
         con.execute(
             """
@@ -105,6 +122,7 @@ def checkout():
         return jsonify({"ok": False, "error": error or "Invalid cart"}), 400
 
     order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
+    upload_token = new_upload_token()
 
     con = connect()
     try:
@@ -112,8 +130,6 @@ def checkout():
 
         product_rows: dict[str, sqlite3.Row] = {}
 
-        # First pass: validate every requested product against current SQLite stock.
-        # No stock changes happen until every line passes.
         for product_id, requested_qty in requested.items():
             row = con.execute(
                 """
@@ -149,7 +165,6 @@ def checkout():
 
             product_rows[product_id] = row
 
-        # Second pass: all stock is valid, now create the order and reduce inventory.
         lines: list[dict[str, Any]] = []
         total_cents = 0
 
@@ -180,10 +195,10 @@ def checkout():
 
         con.execute(
             """
-            INSERT INTO orders (id, created_at, status, total_cents)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO orders (id, created_at, status, total_cents, upload_token)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (order_id, now_iso(), "paid", total_cents),
+            (order_id, now_iso(), "paid", total_cents, upload_token),
         )
 
         con.executemany(
@@ -222,6 +237,7 @@ def checkout():
                 "status": "paid",
                 "total_cents": total_cents,
                 "items": lines,
+                "upload_token": upload_token,
             },
             "products": products,
         })
@@ -233,6 +249,7 @@ def checkout():
 
 
 @orders_bp.get("/api/orders")
+@require_admin
 def list_orders():
     init_orders_db()
 
