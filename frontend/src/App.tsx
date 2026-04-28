@@ -54,9 +54,16 @@ type OrdersResponse = {
   orders: Order[];
 };
 
+type AdminLoginResponse = {
+  ok: boolean;
+  token?: string;
+  error?: string;
+};
+
 type SortMode = "featured" | "name" | "price-low" | "price-high" | "stock-high";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000").replace(/\/$/, "");
+const ADMIN_TOKEN_KEY = "iato_owner_admin_token";
 
 function money(cents: number) {
   return (cents / 100).toLocaleString(undefined, {
@@ -75,6 +82,12 @@ function shortDate(value: string) {
   });
 }
 
+function customerStockLabel(stock: number) {
+  if (stock <= 0) return "Sold Out";
+  if (stock <= 5) return "Limited";
+  return "Available";
+}
+
 function clampCartToProducts(cart: Record<string, number>, sourceProducts: Product[]) {
   const next: Record<string, number> = {};
 
@@ -91,11 +104,7 @@ function clampCartToProducts(cart: Record<string, number>, sourceProducts: Produ
 
   return next;
 }
-function customerStockLabel(stock: number) {
-  if (stock <= 0) return "Sold Out";
-  if (stock <= 5) return "Limited";
-  return "Available";
-}
+
 export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -108,12 +117,19 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const [sortMode, setSortMode] = useState<SortMode>("featured");
+  const [adminToken, setAdminToken] = useState(() => localStorage.getItem(ADMIN_TOKEN_KEY) || "");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
 
-  const viewMode = new URLSearchParams(window.location.search).get("view") === "operator"
-    ? "operator"
-    : "customer";
+  const rawViewMode = new URLSearchParams(window.location.search).get("view");
 
-  const isOperator = viewMode === "operator";
+  const viewMode =
+    rawViewMode === "owner" || rawViewMode === "operator"
+      ? rawViewMode
+      : "customer";
+
+  const wantsAdminView = viewMode === "owner" || viewMode === "operator";
+  const hasAdminAccess = wantsAdminView && Boolean(adminToken);
 
   const categories = useMemo(() => {
     return ["All", ...Array.from(new Set(products.map((p) => p.category))).sort()];
@@ -169,14 +185,43 @@ export default function App() {
     return products.reduce((sum, product) => sum + product.stock, 0);
   }, [products]);
 
-  async function loadOrders() {
-    const res = await fetch(`${API_BASE}/api/orders`);
+  function adminHeaders(token = adminToken) {
+    return {
+      Authorization: `Bearer ${token}`,
+    };
+  }
+
+  function logoutAdmin() {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    setAdminToken("");
+    setOrders([]);
+    setNotice("Owner signed out.");
+  }
+
+  async function loadOrders(token = adminToken) {
+    if (!token) {
+      setOrders([]);
+      return;
+    }
+
+    const res = await fetch(`${API_BASE}/api/orders`, {
+      headers: adminHeaders(token),
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      localStorage.removeItem(ADMIN_TOKEN_KEY);
+      setAdminToken("");
+      setOrders([]);
+      throw new Error("Owner session expired. Log in again.");
+    }
+
     if (!res.ok) throw new Error(`Orders failed: ${res.status}`);
+
     const data: OrdersResponse = await res.json();
     setOrders(data.orders);
   }
 
-  async function boot() {
+  async function boot(token = adminToken) {
     try {
       const healthRes = await fetch(`${API_BASE}/api/health`);
       if (!healthRes.ok) throw new Error(`Health failed: ${healthRes.status}`);
@@ -191,10 +236,13 @@ export default function App() {
       setCart((current) => clampCartToProducts(current, productsData.products));
       setCapacity(productsData.capacity || 100);
       setError("");
-      await loadOrders();
+
+      if (token) {
+        await loadOrders(token);
+      } else {
+        setOrders([]);
+      }
     } catch (err: unknown) {
-      setHealth(null);
-      setProducts([]);
       setError(err instanceof Error ? err.message : "Backend connection failed");
     }
   }
@@ -202,6 +250,41 @@ export default function App() {
   useEffect(() => {
     boot();
   }, []);
+
+  async function loginAdmin(event: React.FormEvent) {
+    event.preventDefault();
+
+    setBusy(true);
+    setLoginError("");
+    setNotice("");
+    setError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password: adminPassword }),
+      });
+
+      const data: AdminLoginResponse = await res.json();
+
+      if (!res.ok || !data.ok || !data.token) {
+        throw new Error(data.error || "Owner login failed");
+      }
+
+      localStorage.setItem(ADMIN_TOKEN_KEY, data.token);
+      setAdminToken(data.token);
+      setAdminPassword("");
+      setNotice("Owner login successful.");
+      await boot(data.token);
+    } catch (err: unknown) {
+      setLoginError(err instanceof Error ? err.message : "Owner login failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function scrollToCatalog() {
     const catalog = document.getElementById("catalog");
@@ -231,20 +314,17 @@ export default function App() {
       if (!productsRes.ok) throw new Error(`Products failed: ${productsRes.status}`);
       const productsData: ProductsResponse = await productsRes.json();
 
-      const ordersRes = await fetch(`${API_BASE}/api/orders`);
-      if (!ordersRes.ok) throw new Error(`Orders failed: ${ordersRes.status}`);
-      const ordersData: OrdersResponse = await ordersRes.json();
-
       setHealth(healthData);
       setProducts(productsData.products);
       setCart((current) => clampCartToProducts(current, productsData.products));
       setCapacity(productsData.capacity || 100);
-      setOrders(ordersData.orders);
+
+      if (adminToken) {
+        await loadOrders(adminToken);
+      }
+
       setNotice("System refreshed.");
     } catch (err: unknown) {
-      setHealth(null);
-      setProducts([]);
-      setOrders([]);
       setError(err instanceof Error ? err.message : "System refresh failed");
     } finally {
       setBusy(false);
@@ -321,12 +401,17 @@ export default function App() {
         throw new Error(data.error || `Checkout failed: ${res.status}`);
       }
 
-      if (data.products) setProducts(data.products);
+      if (data.products) {
+        setProducts(data.products);
         setCart((current) => clampCartToProducts(current, data.products || []));
+      }
 
       setCart({});
       setNotice(`Order complete: ${data.order?.id || "created"}`);
-      await loadOrders();
+
+      if (adminToken) {
+        await loadOrders(adminToken);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Checkout failed");
     } finally {
@@ -335,6 +420,11 @@ export default function App() {
   }
 
   async function updateStock(productId: string, stock: number) {
+    if (!adminToken) {
+      setError("Owner login required.");
+      return;
+    }
+
     setBusy(true);
     setError("");
     setNotice("");
@@ -344,18 +434,24 @@ export default function App() {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
+          ...adminHeaders(),
         },
         body: JSON.stringify({ stock }),
       });
 
       const data = await res.json();
 
+      if (res.status === 401 || res.status === 403) {
+        logoutAdmin();
+        throw new Error("Owner session expired. Log in again.");
+      }
+
       if (!res.ok || !data.ok) {
         throw new Error(data.error || `Stock update failed: ${res.status}`);
       }
 
       setProducts(data.products);
-        setCart((current) => clampCartToProducts(current, data.products || []));
+      setCart((current) => clampCartToProducts(current, data.products || []));
       setNotice("Stock updated.");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Stock update failed");
@@ -384,10 +480,14 @@ export default function App() {
             <b>I AM THE ONE™</b>
           </div>
 
-          {isOperator ? (
+          {hasAdminAccess ? (
             <div className="connection-pill">
               <span className={health?.ok ? "dot good" : "dot bad"} />
-              {health?.ok ? "Backend Online" : "Backend Offline"}
+              {health?.ok ? "Owner Online" : "Backend Offline"}
+            </div>
+          ) : wantsAdminView ? (
+            <div className="connection-pill">
+              Owner Login Required
             </div>
           ) : (
             <div className="connection-pill customer-pill">
@@ -398,20 +498,31 @@ export default function App() {
 
         <div className="hero-content">
           <div className="hero-copy-wrap">
-            <p className="eyebrow">{isOperator ? "Full Scale Luxury Commerce" : "Premium Luxury Storefront"}</p>
-            <h1>{isOperator ? "Luxury storefront. 100-item catalog. Operator-grade checkout." : "Luxury goods. Premium drops. Clean checkout."}</h1>
+            <p className="eyebrow">
+              {hasAdminAccess ? "Owner Control Center" : "Premium Luxury Storefront"}
+            </p>
+            <h1>
+              {hasAdminAccess
+                ? "Owner dashboard. Protected stock controls. Live order view."
+                : "Luxury goods. Premium drops. Clean checkout."}
+            </h1>
             <p className="hero-copy">
-              {isOperator
-                ? "Premium product presentation with live Flask inventory, SQLite checkout, cart control, recent orders, search, filtering, sorting, and stock management."
+              {hasAdminAccess
+                ? "Manage live inventory, review recent orders, and control the storefront from a protected owner view."
                 : "Browse premium products, build your cart, and complete your order through a clean luxury storefront experience."}
             </p>
 
             <div className="hero-actions">
               <button onClick={scrollToCatalog}>Enter Storefront</button>
-              {isOperator && (
-                <button className="ghost" onClick={refreshSystem} disabled={busy}>
-                  {busy ? "Refreshing..." : "Refresh System"}
-                </button>
+              {hasAdminAccess && (
+                <>
+                  <button className="ghost" onClick={refreshSystem} disabled={busy}>
+                    {busy ? "Refreshing..." : "Refresh System"}
+                  </button>
+                  <button className="ghost" onClick={logoutAdmin}>
+                    Sign Out
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -426,10 +537,10 @@ export default function App() {
               <p>{spotlight?.description || "Preparing premium inventory."}</p>
               <div className="stage-price">
                 <strong>{spotlight ? money(spotlight.price_cents) : "$0.00"}</strong>
-                <b>{isOperator ? `${spotlight?.stock ?? 0} left` : "Available"}</b>
+                <b>{hasAdminAccess ? `${spotlight?.stock ?? 0} left` : customerStockLabel(spotlight?.stock ?? 0)}</b>
               </div>
             </div>
-            <div className="floating-chip chip-one">Live Stock</div>
+            <div className="floating-chip chip-one">{hasAdminAccess ? "Owner Tools" : "Premium Drop"}</div>
             <div className="floating-chip chip-two">Luxury UI</div>
             <div className="floating-chip chip-three">Checkout</div>
           </div>
@@ -445,12 +556,12 @@ export default function App() {
             <b>{products.length}</b>
           </div>
           <div>
-            <span>Total Stock</span>
-            <b>{totalStock}</b>
+            <span>{hasAdminAccess ? "Total Stock" : "Collection"}</span>
+            <b>{hasAdminAccess ? totalStock : "Live"}</b>
           </div>
           <div>
-            <span>Recent Orders</span>
-            <b>{orders.length}</b>
+            <span>{hasAdminAccess ? "Recent Orders" : "Checkout"}</span>
+            <b>{hasAdminAccess ? orders.length : "Ready"}</b>
           </div>
         </div>
       </section>
@@ -462,10 +573,34 @@ export default function App() {
         </section>
       )}
 
+      {wantsAdminView && !hasAdminAccess && (
+        <section className="admin-login-panel">
+          <div>
+            <p className="eyebrow small">Protected Owner Access</p>
+            <h2>Owner/Admin Login</h2>
+            <p>Enter your owner password to unlock stock controls, recent orders, and protected admin tools.</p>
+          </div>
+
+          <form onSubmit={loginAdmin}>
+            <input
+              type="password"
+              value={adminPassword}
+              onChange={(event) => setAdminPassword(event.target.value)}
+              placeholder="Owner password"
+              autoComplete="current-password"
+            />
+            <button disabled={busy || !adminPassword.trim()}>
+              {busy ? "Checking..." : "Unlock Owner View"}
+            </button>
+            {loginError && <span>{loginError}</span>}
+          </form>
+        </section>
+      )}
+
       <section id="catalog" className="command-bar">
         <div>
-          <p className="eyebrow small">{isOperator ? "Luxury Catalog" : "Shop The Collection"}</p>
-          <h2>{isOperator ? "Premium Inventory" : "Featured Products"}</h2>
+          <p className="eyebrow small">{hasAdminAccess ? "Owner Catalog" : "Shop The Collection"}</p>
+          <h2>{hasAdminAccess ? "Premium Inventory" : "Featured Products"}</h2>
           <span>
             Showing {visibleProducts.length} of {products.length}
           </span>
@@ -511,7 +646,7 @@ export default function App() {
                 <div className="image-wrap">
                   <ProductImage sku={product.sku} name={product.name} remoteUrl={product.image_url} />
                   <span>{product.category}</span>
-                  {lowStock && <b className="low-stock">Low stock</b>}
+                  {lowStock && <b className="low-stock">{hasAdminAccess ? "Low stock" : "Limited"}</b>}
                 </div>
 
                 <div className="product-body">
@@ -524,7 +659,7 @@ export default function App() {
                   <p>{product.description}</p>
 
                   <div className="product-meta">
-                    {isOperator ? (
+                    {hasAdminAccess ? (
                       <>
                         <span>{product.stock} in stock</span>
                         <span>{inCart} in cart</span>
@@ -542,10 +677,10 @@ export default function App() {
                     disabled={!canAdd || busy}
                     onClick={() => addToCart(product)}
                   >
-                    {canAdd ? "Add to Cart" : "No More Stock"}
+                    {canAdd ? "Add to Cart" : "Sold Out"}
                   </button>
 
-                  {isOperator && (
+                  {hasAdminAccess && (
                     <div className="operator-stock">
                       <button
                         disabled={busy}
@@ -607,31 +742,31 @@ export default function App() {
             {busy ? "Processing..." : "Checkout"}
           </button>
 
-          {isOperator && (
-          <div className="orders-panel">
-            <div className="orders-head">
-              <p className="eyebrow small">Operator</p>
-              <h3>Recent Orders</h3>
-            </div>
-
-            {orders.length === 0 ? (
-              <p className="empty">No orders yet.</p>
-            ) : (
-              <div className="orders-list">
-                {orders.slice(0, 8).map((order) => (
-                  <div className="order-row" key={order.id}>
-                    <div>
-                      <strong>{order.id}</strong>
-                      <span>
-                        {order.status} · {shortDate(order.created_at)}
-                      </span>
-                    </div>
-                    <b>{money(order.total_cents)}</b>
-                  </div>
-                ))}
+          {hasAdminAccess && (
+            <div className="orders-panel">
+              <div className="orders-head">
+                <p className="eyebrow small">Owner</p>
+                <h3>Recent Orders</h3>
               </div>
-            )}
-          </div>
+
+              {orders.length === 0 ? (
+                <p className="empty">No orders yet.</p>
+              ) : (
+                <div className="orders-list">
+                  {orders.slice(0, 8).map((order) => (
+                    <div className="order-row" key={order.id}>
+                      <div>
+                        <strong>{order.id}</strong>
+                        <span>
+                          {order.status} · {shortDate(order.created_at)}
+                        </span>
+                      </div>
+                      <b>{money(order.total_cents)}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </aside>
       </section>
@@ -652,9 +787,3 @@ export default function App() {
     </main>
   );
 }
-
-
-
-
-
-

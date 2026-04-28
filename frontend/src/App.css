@@ -1480,3 +1480,76 @@ h1 {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+
+/* =========================
+   OWNER / ADMIN LOGIN PANEL
+========================= */
+
+.admin-login-panel {
+  max-width: 1560px;
+  margin: 0 auto 22px;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+  gap: 22px;
+  align-items: center;
+  border-radius: 30px;
+  color: #fff8e7;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 226, 158, 0.14), transparent 34%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.035)),
+    rgba(0, 0, 0, 0.34);
+  border: 1px solid rgba(255, 224, 160, 0.14);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.34);
+}
+
+.admin-login-panel h2 {
+  margin: 8px 0;
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: -0.06em;
+}
+
+.admin-login-panel p {
+  max-width: 680px;
+  margin: 0;
+  color: rgba(255, 248, 231, 0.62);
+  line-height: 1.5;
+}
+
+.admin-login-panel form {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-login-panel input {
+  width: 100%;
+  border: 1px solid rgba(255, 224, 160, 0.16);
+  border-radius: 17px;
+  padding: 14px;
+  color: #fff8e7;
+  background: rgba(0, 0, 0, 0.42);
+  outline: none;
+}
+
+.admin-login-panel button {
+  border: 0;
+  border-radius: 17px;
+  padding: 14px 18px;
+  color: #160d02;
+  background:
+    linear-gradient(135deg, #fff9dc 0%, #ffd979 42%, #bb842e 100%);
+  font-weight: 950;
+}
+
+.admin-login-panel form span {
+  color: #ffb3c0;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+@media (max-width: 780px) {
+  .admin-login-panel {
+    grid-template-columns: 1fr;
+  }
+}

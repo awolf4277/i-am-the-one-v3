@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import quote_plus
 
 from flask import Blueprint, current_app, jsonify, request
+from app.routes.auth import require_admin
 
 catalog_bp = Blueprint("catalog", __name__)
 
@@ -217,6 +218,7 @@ def get_product(product_id: str):
 
 
 @catalog_bp.patch("/api/products/<product_id>")
+@require_admin
 def update_product(product_id: str):
     init_db()
 
@@ -301,3 +303,4 @@ def update_product(product_id: str):
         )
     finally:
         con.close()
+
