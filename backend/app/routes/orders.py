@@ -43,12 +43,28 @@ def init_orders_db() -> None:
                 created_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'paid',
                 total_cents INTEGER NOT NULL DEFAULT 0,
-                upload_token TEXT NOT NULL DEFAULT ''
+                upload_token TEXT NOT NULL DEFAULT '',
+                customer_name TEXT NOT NULL DEFAULT '',
+                customer_email TEXT NOT NULL DEFAULT '',
+                customer_phone TEXT NOT NULL DEFAULT '',
+                shipping_address TEXT NOT NULL DEFAULT '',
+                shipping_city TEXT NOT NULL DEFAULT '',
+                shipping_state TEXT NOT NULL DEFAULT '',
+                shipping_zip TEXT NOT NULL DEFAULT '',
+                order_notes TEXT NOT NULL DEFAULT ''
             )
             """
         )
 
         ensure_column(con, "orders", "upload_token", "upload_token TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "customer_name", "customer_name TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "customer_email", "customer_email TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "customer_phone", "customer_phone TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "shipping_address", "shipping_address TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "shipping_city", "shipping_city TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "shipping_state", "shipping_state TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "shipping_zip", "shipping_zip TEXT NOT NULL DEFAULT ''")
+        ensure_column(con, "orders", "order_notes", "order_notes TEXT NOT NULL DEFAULT ''")
 
         con.execute(
             """
@@ -69,6 +85,43 @@ def init_orders_db() -> None:
         con.commit()
     finally:
         con.close()
+
+
+def clean_text(value: Any, max_len: int = 500) -> str:
+    return str(value or "").strip()[:max_len]
+
+
+def normalize_customer(payload: dict[str, Any]) -> dict[str, str]:
+    raw = payload.get("customer", {})
+
+    if not isinstance(raw, dict):
+        raw = {}
+
+    return {
+        "customer_name": clean_text(raw.get("name"), 120),
+        "customer_email": clean_text(raw.get("email"), 180),
+        "customer_phone": clean_text(raw.get("phone"), 60),
+        "shipping_address": clean_text(raw.get("address"), 240),
+        "shipping_city": clean_text(raw.get("city"), 120),
+        "shipping_state": clean_text(raw.get("state"), 80),
+        "shipping_zip": clean_text(raw.get("zip"), 40),
+        "order_notes": clean_text(raw.get("notes"), 1000),
+    }
+
+
+def validate_customer(customer: dict[str, str]) -> str | None:
+    # Keep this practical for now: name + email required.
+    # Address can be optional for digital/software orders.
+    if not customer["customer_name"]:
+        return "Customer name is required"
+
+    if not customer["customer_email"]:
+        return "Customer email is required"
+
+    if "@" not in customer["customer_email"] or "." not in customer["customer_email"]:
+        return "Valid customer email is required"
+
+    return None
 
 
 def list_products_payload(con: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -121,6 +174,12 @@ def checkout():
     if error or requested is None:
         return jsonify({"ok": False, "error": error or "Invalid cart"}), 400
 
+    customer = normalize_customer(payload)
+    customer_error = validate_customer(customer)
+
+    if customer_error:
+        return jsonify({"ok": False, "error": customer_error}), 400
+
     order_id = f"ORD-{uuid.uuid4().hex[:10].upper()}"
     upload_token = new_upload_token()
 
@@ -130,6 +189,7 @@ def checkout():
 
         product_rows: dict[str, sqlite3.Row] = {}
 
+        # Validate every requested item first. Do not reduce stock until all lines pass.
         for product_id, requested_qty in requested.items():
             row = con.execute(
                 """
@@ -195,10 +255,38 @@ def checkout():
 
         con.execute(
             """
-            INSERT INTO orders (id, created_at, status, total_cents, upload_token)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO orders (
+                id,
+                created_at,
+                status,
+                total_cents,
+                upload_token,
+                customer_name,
+                customer_email,
+                customer_phone,
+                shipping_address,
+                shipping_city,
+                shipping_state,
+                shipping_zip,
+                order_notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (order_id, now_iso(), "paid", total_cents, upload_token),
+            (
+                order_id,
+                now_iso(),
+                "paid",
+                total_cents,
+                upload_token,
+                customer["customer_name"],
+                customer["customer_email"],
+                customer["customer_phone"],
+                customer["shipping_address"],
+                customer["shipping_city"],
+                customer["shipping_state"],
+                customer["shipping_zip"],
+                customer["order_notes"],
+            ),
         )
 
         con.executemany(
@@ -238,6 +326,16 @@ def checkout():
                 "total_cents": total_cents,
                 "items": lines,
                 "upload_token": upload_token,
+                "customer": {
+                    "name": customer["customer_name"],
+                    "email": customer["customer_email"],
+                    "phone": customer["customer_phone"],
+                    "address": customer["shipping_address"],
+                    "city": customer["shipping_city"],
+                    "state": customer["shipping_state"],
+                    "zip": customer["shipping_zip"],
+                    "notes": customer["order_notes"],
+                },
             },
             "products": products,
         })
@@ -257,7 +355,16 @@ def list_orders():
     try:
         rows = con.execute(
             """
-            SELECT id, created_at, status, total_cents
+            SELECT
+                id,
+                created_at,
+                status,
+                total_cents,
+                customer_name,
+                customer_email,
+                customer_phone,
+                shipping_city,
+                shipping_state
             FROM orders
             ORDER BY created_at DESC
             LIMIT 50
