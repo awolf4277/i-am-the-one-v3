@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState, type FormEvent } from "react";
 import "./App.css";
 import ProductImage from "./components/ProductImage";
 
@@ -38,6 +38,7 @@ type CheckoutResponse = {
     id: string;
     status: string;
     total_cents: number;
+    upload_token?: string;
   };
   products?: Product[];
 };
@@ -58,6 +59,25 @@ type AdminLoginResponse = {
   ok: boolean;
   token?: string;
   error?: string;
+};
+
+type CompletedOrder = {
+  id: string;
+  total_cents: number;
+  upload_token: string;
+};
+
+type BuyerUploadResponse = {
+  ok: boolean;
+  error?: string;
+  upload?: {
+    id: string;
+    order_id: string;
+    original_filename: string;
+    stored_filename: string;
+    content_type: string;
+    size_bytes: number;
+  };
 };
 
 type SortMode = "featured" | "name" | "price-low" | "price-high" | "stock-high";
@@ -120,6 +140,10 @@ export default function App() {
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem(ADMIN_TOKEN_KEY) || "");
   const [adminPassword, setAdminPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [completedOrder, setCompletedOrder] = useState<CompletedOrder | null>(null);
+  const [buyerUploadFile, setBuyerUploadFile] = useState<File | null>(null);
+  const [buyerUploadStatus, setBuyerUploadStatus] = useState("");
+  const [buyerUploadBusy, setBuyerUploadBusy] = useState(false);
 
   const rawViewMode = new URLSearchParams(window.location.search).get("view");
 
@@ -251,7 +275,7 @@ export default function App() {
     boot();
   }, []);
 
-  async function loginAdmin(event: React.FormEvent) {
+  async function loginAdmin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setBusy(true);
@@ -380,6 +404,7 @@ export default function App() {
     setBusy(true);
     setError("");
     setNotice("");
+    setBuyerUploadStatus("");
 
     const items: CartLine[] = cartLines.map((line) => ({
       product_id: line.product.id,
@@ -397,16 +422,26 @@ export default function App() {
 
       const data: CheckoutResponse = await res.json();
 
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || `Checkout failed: ${res.status}`);
-      }
-
       if (data.products) {
         setProducts(data.products);
         setCart((current) => clampCartToProducts(current, data.products || []));
       }
 
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `Checkout failed: ${res.status}`);
+      }
+
       setCart({});
+
+      if (data.order?.id) {
+        setCompletedOrder({
+          id: data.order.id,
+          total_cents: data.order.total_cents,
+          upload_token: data.order.upload_token || "",
+        });
+        setBuyerUploadFile(null);
+      }
+
       setNotice(`Order complete: ${data.order?.id || "created"}`);
 
       if (adminToken) {
@@ -416,6 +451,56 @@ export default function App() {
       setError(err instanceof Error ? err.message : "Checkout failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function uploadBuyerFile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!completedOrder) {
+      setBuyerUploadStatus("Complete checkout first.");
+      return;
+    }
+
+    if (!completedOrder.upload_token) {
+      setBuyerUploadStatus("Upload token missing for this order.");
+      return;
+    }
+
+    if (!buyerUploadFile) {
+      setBuyerUploadStatus("Choose a file first.");
+      return;
+    }
+
+    setBuyerUploadBusy(true);
+    setBuyerUploadStatus("");
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", buyerUploadFile);
+
+      const url =
+        `${API_BASE}/api/orders/${encodeURIComponent(completedOrder.id)}` +
+        `/uploads?token=${encodeURIComponent(completedOrder.upload_token)}`;
+
+      const res = await fetch(url, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data: BuyerUploadResponse = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `Upload failed: ${res.status}`);
+      }
+
+      setBuyerUploadStatus(`Uploaded: ${data.upload?.original_filename || buyerUploadFile.name}`);
+      setBuyerUploadFile(null);
+    } catch (err: unknown) {
+      setBuyerUploadStatus(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setBuyerUploadBusy(false);
     }
   }
 
@@ -486,13 +571,9 @@ export default function App() {
               {health?.ok ? "Owner Online" : "Backend Offline"}
             </div>
           ) : wantsAdminView ? (
-            <div className="connection-pill">
-              Owner Login Required
-            </div>
+            <div className="connection-pill">Owner Login Required</div>
           ) : (
-            <div className="connection-pill customer-pill">
-              Secure Luxury Checkout
-            </div>
+            <div className="connection-pill customer-pill">Secure Luxury Checkout</div>
           )}
         </div>
 
@@ -570,6 +651,34 @@ export default function App() {
         <section className="message-wrap">
           {error && <div className="message error-box">{error}</div>}
           {notice && <div className="message success-box">{notice}</div>}
+        </section>
+      )}
+
+      {completedOrder && (
+        <section className="admin-login-panel buyer-upload-panel">
+          <div>
+            <p className="eyebrow small">Order Complete</p>
+            <h2>Upload Your File</h2>
+            <p>
+              Order <strong>{completedOrder.id}</strong> is ready. Attach your buyer file,
+              document, design asset, or project upload below.
+            </p>
+            <p>
+              Order total: <strong>{money(completedOrder.total_cents)}</strong>
+            </p>
+          </div>
+
+          <form onSubmit={uploadBuyerFile}>
+            <input
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.zip"
+              onChange={(event) => setBuyerUploadFile(event.target.files?.[0] || null)}
+            />
+            <button disabled={buyerUploadBusy || !buyerUploadFile}>
+              {buyerUploadBusy ? "Uploading..." : "Upload File"}
+            </button>
+            {buyerUploadStatus && <span>{buyerUploadStatus}</span>}
+          </form>
         </section>
       )}
 
