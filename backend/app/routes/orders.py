@@ -10,7 +10,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from app.routes.auth import require_admin
-from app.routes.catalog import connect, init_db as init_catalog_db, row_to_dict
+from app.routes.catalog import connect, init_db as init_catalog_db, list_products_payload, row_to_dict
 
 orders_bp = Blueprint("orders", __name__)
 
@@ -110,8 +110,6 @@ def normalize_customer(payload: dict[str, Any]) -> dict[str, str]:
 
 
 def validate_customer(customer: dict[str, str]) -> str | None:
-    # Keep this practical for now: name + email required.
-    # Address can be optional for digital/software orders.
     if not customer["customer_name"]:
         return "Customer name is required"
 
@@ -122,18 +120,6 @@ def validate_customer(customer: dict[str, str]) -> str | None:
         return "Valid customer email is required"
 
     return None
-
-
-def list_products_payload(con: sqlite3.Connection) -> list[dict[str, Any]]:
-    rows = con.execute(
-        """
-        SELECT id, sku, name, description, category, price_cents, stock, image_url
-        FROM products
-        ORDER BY sku ASC
-        """
-    ).fetchall()
-
-    return [row_to_dict(row) for row in rows]
 
 
 def normalize_cart_items(raw_items: Any) -> tuple[dict[str, int] | None, str | None]:
@@ -166,8 +152,6 @@ def normalize_cart_items(raw_items: Any) -> tuple[dict[str, int] | None, str | N
 
 @orders_bp.post("/api/checkout")
 def checkout():
-    init_orders_db()
-
     payload = request.get_json(silent=True) or {}
     requested, error = normalize_cart_items(payload.get("items", []))
 
@@ -189,7 +173,6 @@ def checkout():
 
         product_rows: dict[str, sqlite3.Row] = {}
 
-        # Validate every requested item first. Do not reduce stock until all lines pass.
         for product_id, requested_qty in requested.items():
             row = con.execute(
                 """
@@ -203,25 +186,29 @@ def checkout():
             if row is None:
                 products = list_products_payload(con)
                 con.rollback()
-                return jsonify({
-                    "ok": False,
-                    "error": f"Product not found: {product_id}",
-                    "products": products,
-                }), 404
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Product not found: {product_id}",
+                        "products": products,
+                    }
+                ), 404
 
             current_stock = int(row["stock"])
 
             if requested_qty > current_stock:
                 products = list_products_payload(con)
                 con.rollback()
-                return jsonify({
-                    "ok": False,
-                    "error": f"Not enough stock for {row['name']}. Requested {requested_qty}, available {current_stock}.",
-                    "product_id": product_id,
-                    "requested_qty": requested_qty,
-                    "available_stock": current_stock,
-                    "products": products,
-                }), 409
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Not enough stock for {row['name']}. Requested {requested_qty}, available {current_stock}.",
+                        "product_id": product_id,
+                        "requested_qty": requested_qty,
+                        "available_stock": current_stock,
+                        "products": products,
+                    }
+                ), 409
 
             product_rows[product_id] = row
 
@@ -233,16 +220,18 @@ def checkout():
             line_total = int(row["price_cents"]) * qty
             total_cents += line_total
 
-            lines.append({
-                "id": f"ITEM-{uuid.uuid4().hex[:10].upper()}",
-                "order_id": order_id,
-                "product_id": row["id"],
-                "sku": row["sku"],
-                "name": row["name"],
-                "unit_price_cents": int(row["price_cents"]),
-                "quantity": qty,
-                "line_total_cents": line_total,
-            })
+            lines.append(
+                {
+                    "id": f"ITEM-{uuid.uuid4().hex[:10].upper()}",
+                    "order_id": order_id,
+                    "product_id": row["id"],
+                    "sku": row["sku"],
+                    "name": row["name"],
+                    "unit_price_cents": int(row["price_cents"]),
+                    "quantity": qty,
+                    "line_total_cents": line_total,
+                }
+            )
 
             con.execute(
                 """
@@ -318,27 +307,29 @@ def checkout():
         products = list_products_payload(con)
         con.commit()
 
-        return jsonify({
-            "ok": True,
-            "order": {
-                "id": order_id,
-                "status": "paid",
-                "total_cents": total_cents,
-                "items": lines,
-                "upload_token": upload_token,
-                "customer": {
-                    "name": customer["customer_name"],
-                    "email": customer["customer_email"],
-                    "phone": customer["customer_phone"],
-                    "address": customer["shipping_address"],
-                    "city": customer["shipping_city"],
-                    "state": customer["shipping_state"],
-                    "zip": customer["shipping_zip"],
-                    "notes": customer["order_notes"],
+        return jsonify(
+            {
+                "ok": True,
+                "order": {
+                    "id": order_id,
+                    "status": "paid",
+                    "total_cents": total_cents,
+                    "items": lines,
+                    "upload_token": upload_token,
+                    "customer": {
+                        "name": customer["customer_name"],
+                        "email": customer["customer_email"],
+                        "phone": customer["customer_phone"],
+                        "address": customer["shipping_address"],
+                        "city": customer["shipping_city"],
+                        "state": customer["shipping_state"],
+                        "zip": customer["shipping_zip"],
+                        "notes": customer["order_notes"],
+                    },
                 },
-            },
-            "products": products,
-        })
+                "products": products,
+            }
+        )
     except Exception:
         con.rollback()
         raise
@@ -349,8 +340,6 @@ def checkout():
 @orders_bp.get("/api/orders")
 @require_admin
 def list_orders():
-    init_orders_db()
-
     con = connect()
     try:
         rows = con.execute(
@@ -371,9 +360,88 @@ def list_orders():
             """
         ).fetchall()
 
-        return jsonify({
-            "ok": True,
-            "orders": [row_to_dict(row) for row in rows],
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "orders": [row_to_dict(row) for row in rows],
+            }
+        )
+    finally:
+        con.close()
+
+
+@orders_bp.get("/api/orders/<order_id>")
+@require_admin
+def get_order_detail(order_id: str):
+    con = connect()
+    try:
+        order_row = con.execute(
+            """
+            SELECT
+                id,
+                created_at,
+                status,
+                total_cents,
+                upload_token,
+                customer_name,
+                customer_email,
+                customer_phone,
+                shipping_address,
+                shipping_city,
+                shipping_state,
+                shipping_zip,
+                order_notes
+            FROM orders
+            WHERE id = ?
+            """,
+            (order_id,),
+        ).fetchone()
+
+        if order_row is None:
+            return jsonify({"ok": False, "error": "Order not found"}), 404
+
+        item_rows = con.execute(
+            """
+            SELECT
+                id,
+                order_id,
+                product_id,
+                sku,
+                name,
+                unit_price_cents,
+                quantity,
+                line_total_cents
+            FROM order_items
+            WHERE order_id = ?
+            ORDER BY name ASC
+            """,
+            (order_id,),
+        ).fetchall()
+
+        upload_rows = con.execute(
+            """
+            SELECT
+                id,
+                order_id,
+                original_filename,
+                stored_filename,
+                content_type,
+                size_bytes,
+                created_at
+            FROM order_uploads
+            WHERE order_id = ?
+            ORDER BY created_at DESC
+            """,
+            (order_id,),
+        ).fetchall()
+
+        return jsonify(
+            {
+                "ok": True,
+                "order": row_to_dict(order_row),
+                "items": [row_to_dict(row) for row in item_rows],
+                "uploads": [row_to_dict(row) for row in upload_rows],
+            }
+        )
     finally:
         con.close()
