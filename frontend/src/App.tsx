@@ -31,6 +31,17 @@ type CartLine = {
   qty: number;
 };
 
+type CustomerInfo = {
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  notes: string;
+};
+
 type CheckoutResponse = {
   ok: boolean;
   error?: string;
@@ -39,6 +50,7 @@ type CheckoutResponse = {
     status: string;
     total_cents: number;
     upload_token?: string;
+    customer?: CustomerInfo;
   };
   products?: Product[];
 };
@@ -48,11 +60,67 @@ type Order = {
   created_at: string;
   status: string;
   total_cents: number;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  shipping_city?: string;
+  shipping_state?: string;
+};
+
+type OrderDetailOrder = {
+  id: string;
+  created_at: string;
+  status: string;
+  total_cents: number;
+  upload_token: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  shipping_address: string;
+  shipping_city: string;
+  shipping_state: string;
+  shipping_zip: string;
+  order_notes: string;
+};
+
+type OrderDetailItem = {
+  id: string;
+  order_id: string;
+  product_id: string;
+  sku: string;
+  name: string;
+  unit_price_cents: number;
+  quantity: number;
+  line_total_cents: number;
+};
+
+type OrderUpload = {
+  id: string;
+  order_id: string;
+  original_filename: string;
+  stored_filename: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
+};
+
+type OrderDetail = {
+  order: OrderDetailOrder;
+  items: OrderDetailItem[];
+  uploads: OrderUpload[];
 };
 
 type OrdersResponse = {
   ok: boolean;
   orders: Order[];
+};
+
+type OrderDetailResponse = {
+  ok: boolean;
+  error?: string;
+  order?: OrderDetailOrder;
+  items?: OrderDetailItem[];
+  uploads?: OrderUpload[];
 };
 
 type AdminLoginResponse = {
@@ -65,6 +133,7 @@ type CompletedOrder = {
   id: string;
   total_cents: number;
   upload_token: string;
+  customer?: CustomerInfo;
 };
 
 type BuyerUploadResponse = {
@@ -85,6 +154,17 @@ type SortMode = "featured" | "name" | "price-low" | "price-high" | "stock-high";
 const API_BASE = (import.meta.env.VITE_API_BASE || "http://127.0.0.1:5000").replace(/\/$/, "");
 const ADMIN_TOKEN_KEY = "iato_owner_admin_token";
 
+const EMPTY_CUSTOMER: CustomerInfo = {
+  name: "",
+  email: "",
+  phone: "",
+  address: "",
+  city: "",
+  state: "",
+  zip: "",
+  notes: "",
+};
+
 function money(cents: number) {
   return (cents / 100).toLocaleString(undefined, {
     style: "currency",
@@ -100,6 +180,13 @@ function shortDate(value: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function fileSizeLabel(sizeBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return "0 B";
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function customerStockLabel(stock: number) {
@@ -131,6 +218,8 @@ export default function App() {
   const [capacity, setCapacity] = useState(100);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [orders, setOrders] = useState<Order[]>([]);
+  const [orderDetail, setOrderDetail] = useState<OrderDetail | null>(null);
+  const [orderDetailBusy, setOrderDetailBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -144,6 +233,7 @@ export default function App() {
   const [buyerUploadFile, setBuyerUploadFile] = useState<File | null>(null);
   const [buyerUploadStatus, setBuyerUploadStatus] = useState("");
   const [buyerUploadBusy, setBuyerUploadBusy] = useState(false);
+  const [customerInfo, setCustomerInfo] = useState<CustomerInfo>(EMPTY_CUSTOMER);
 
   const rawViewMode = new URLSearchParams(window.location.search).get("view");
 
@@ -215,10 +305,18 @@ export default function App() {
     };
   }
 
+  function updateCustomerField(field: keyof CustomerInfo, value: string) {
+    setCustomerInfo((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
   function logoutAdmin() {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
     setAdminToken("");
     setOrders([]);
+    setOrderDetail(null);
     setNotice("Owner signed out.");
   }
 
@@ -236,6 +334,7 @@ export default function App() {
       localStorage.removeItem(ADMIN_TOKEN_KEY);
       setAdminToken("");
       setOrders([]);
+      setOrderDetail(null);
       throw new Error("Owner session expired. Log in again.");
     }
 
@@ -243,6 +342,44 @@ export default function App() {
 
     const data: OrdersResponse = await res.json();
     setOrders(data.orders);
+  }
+
+  async function loadOrderDetail(orderId: string) {
+    if (!adminToken) {
+      setError("Owner login required.");
+      return;
+    }
+
+    setOrderDetailBusy(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/orders/${encodeURIComponent(orderId)}`, {
+        headers: adminHeaders(),
+      });
+
+      const data: OrderDetailResponse = await res.json();
+
+      if (res.status === 401 || res.status === 403) {
+        logoutAdmin();
+        throw new Error("Owner session expired. Log in again.");
+      }
+
+      if (!res.ok || !data.ok || !data.order) {
+        throw new Error(data.error || `Order detail failed: ${res.status}`);
+      }
+
+      setOrderDetail({
+        order: data.order,
+        items: data.items || [],
+        uploads: data.uploads || [],
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Order detail failed");
+    } finally {
+      setOrderDetailBusy(false);
+    }
   }
 
   async function boot(token = adminToken) {
@@ -345,6 +482,10 @@ export default function App() {
 
       if (adminToken) {
         await loadOrders(adminToken);
+
+        if (orderDetail?.order.id) {
+          await loadOrderDetail(orderDetail.order.id);
+        }
       }
 
       setNotice("System refreshed.");
@@ -356,6 +497,7 @@ export default function App() {
   }
 
   function addToCart(product: Product) {
+    setCompletedOrder(null);
     setNotice("");
     setError("");
 
@@ -395,9 +537,32 @@ export default function App() {
     setError("");
   }
 
+  function validateCustomerForm() {
+    if (!customerInfo.name.trim()) {
+      return "Customer name is required.";
+    }
+
+    if (!customerInfo.email.trim()) {
+      return "Customer email is required.";
+    }
+
+    if (!customerInfo.email.includes("@") || !customerInfo.email.includes(".")) {
+      return "Enter a valid customer email.";
+    }
+
+    return "";
+  }
+
   async function checkout() {
     if (cartLines.length === 0) {
       setError("Cart is empty.");
+      return;
+    }
+
+    const customerError = validateCustomerForm();
+
+    if (customerError) {
+      setError(customerError);
       return;
     }
 
@@ -417,7 +582,10 @@ export default function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ items }),
+        body: JSON.stringify({
+          customer: customerInfo,
+          items,
+        }),
       });
 
       const data: CheckoutResponse = await res.json();
@@ -438,6 +606,7 @@ export default function App() {
           id: data.order.id,
           total_cents: data.order.total_cents,
           upload_token: data.order.upload_token || "",
+          customer: data.order.customer,
         });
         setBuyerUploadFile(null);
       }
@@ -497,6 +666,14 @@ export default function App() {
 
       setBuyerUploadStatus(`Uploaded: ${data.upload?.original_filename || buyerUploadFile.name}`);
       setBuyerUploadFile(null);
+
+      if (adminToken) {
+        await loadOrders(adminToken);
+
+        if (orderDetail?.order.id === completedOrder.id) {
+          await loadOrderDetail(completedOrder.id);
+        }
+      }
     } catch (err: unknown) {
       setBuyerUploadStatus(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -660,8 +837,8 @@ export default function App() {
             <p className="eyebrow small">Order Complete</p>
             <h2>Upload Your File</h2>
             <p>
-              Order <strong>{completedOrder.id}</strong> is ready. Attach your buyer file,
-              document, design asset, or project upload below.
+              Order <strong>{completedOrder.id}</strong> is ready for{" "}
+              <strong>{completedOrder.customer?.name || "your customer profile"}</strong>.
             </p>
             <p>
               Order total: <strong>{money(completedOrder.total_cents)}</strong>
@@ -842,6 +1019,67 @@ export default function App() {
             </div>
           )}
 
+          <form className="checkout-customer-form" onSubmit={(event) => event.preventDefault()}>
+            <p className="eyebrow small">Customer Info</p>
+
+            <input
+              value={customerInfo.name}
+              onChange={(event) => updateCustomerField("name", event.target.value)}
+              placeholder="Full name *"
+              autoComplete="name"
+            />
+
+            <input
+              type="email"
+              value={customerInfo.email}
+              onChange={(event) => updateCustomerField("email", event.target.value)}
+              placeholder="Email *"
+              autoComplete="email"
+            />
+
+            <input
+              value={customerInfo.phone}
+              onChange={(event) => updateCustomerField("phone", event.target.value)}
+              placeholder="Phone"
+              autoComplete="tel"
+            />
+
+            <input
+              value={customerInfo.address}
+              onChange={(event) => updateCustomerField("address", event.target.value)}
+              placeholder="Street address"
+              autoComplete="street-address"
+            />
+
+            <div className="checkout-customer-row">
+              <input
+                value={customerInfo.city}
+                onChange={(event) => updateCustomerField("city", event.target.value)}
+                placeholder="City"
+                autoComplete="address-level2"
+              />
+              <input
+                value={customerInfo.state}
+                onChange={(event) => updateCustomerField("state", event.target.value)}
+                placeholder="State"
+                autoComplete="address-level1"
+              />
+              <input
+                value={customerInfo.zip}
+                onChange={(event) => updateCustomerField("zip", event.target.value)}
+                placeholder="ZIP"
+                autoComplete="postal-code"
+              />
+            </div>
+
+            <textarea
+              value={customerInfo.notes}
+              onChange={(event) => updateCustomerField("notes", event.target.value)}
+              placeholder="Order notes"
+              rows={3}
+            />
+          </form>
+
           <div className="cart-total">
             <span>Total</span>
             <strong>{money(cartTotal)}</strong>
@@ -867,12 +1105,124 @@ export default function App() {
                       <div>
                         <strong>{order.id}</strong>
                         <span>
+                          {order.customer_name ? `${order.customer_name} · ` : ""}
                           {order.status} · {shortDate(order.created_at)}
                         </span>
+                        {order.customer_email && <span>{order.customer_email}</span>}
                       </div>
-                      <b>{money(order.total_cents)}</b>
+
+                      <div className="order-actions">
+                        <b>{money(order.total_cents)}</b>
+                        <button
+                          type="button"
+                          disabled={orderDetailBusy}
+                          onClick={() => loadOrderDetail(order.id)}
+                        >
+                          View
+                        </button>
+                      </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {orderDetail && (
+                <div className="order-detail-panel">
+                  <div className="order-detail-head">
+                    <div>
+                      <p className="eyebrow small">Order Detail</p>
+                      <h3>{orderDetail.order.id}</h3>
+                    </div>
+
+                    <button type="button" onClick={() => setOrderDetail(null)}>
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="detail-grid">
+                    <div>
+                      <span>Customer</span>
+                      <strong>{orderDetail.order.customer_name || "Unknown"}</strong>
+                      <p>{orderDetail.order.customer_email || "No email"}</p>
+                      <p>{orderDetail.order.customer_phone || "No phone"}</p>
+                    </div>
+
+                    <div>
+                      <span>Shipping</span>
+                      <strong>{orderDetail.order.shipping_address || "No address"}</strong>
+                      <p>
+                        {[orderDetail.order.shipping_city, orderDetail.order.shipping_state, orderDetail.order.shipping_zip]
+                          .filter(Boolean)
+                          .join(", ") || "No city/state/zip"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <span>Status</span>
+                      <strong>{orderDetail.order.status}</strong>
+                      <p>{shortDate(orderDetail.order.created_at)}</p>
+                    </div>
+
+                    <div>
+                      <span>Total</span>
+                      <strong>{money(orderDetail.order.total_cents)}</strong>
+                      <p>{orderDetail.items.length} item line(s)</p>
+                    </div>
+                  </div>
+
+                  {orderDetail.order.order_notes && (
+                    <div className="detail-note">
+                      <span>Notes</span>
+                      <p>{orderDetail.order.order_notes}</p>
+                    </div>
+                  )}
+
+                  <div className="detail-section">
+                    <p className="eyebrow small">Purchased Items</p>
+                    {orderDetail.items.length === 0 ? (
+                      <p className="empty">No item records found.</p>
+                    ) : (
+                      <div className="detail-list">
+                        {orderDetail.items.map((item) => (
+                          <div className="detail-line" key={item.id}>
+                            <div>
+                              <strong>{item.name}</strong>
+                              <span>
+                                {item.sku} · Qty {item.quantity} × {money(item.unit_price_cents)}
+                              </span>
+                            </div>
+                            <b>{money(item.line_total_cents)}</b>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="detail-section">
+                    <p className="eyebrow small">Buyer Uploads</p>
+                    {orderDetail.uploads.length === 0 ? (
+                      <p className="empty">No buyer uploads attached yet.</p>
+                    ) : (
+                      <div className="detail-list">
+                        {orderDetail.uploads.map((upload) => (
+                          <div className="detail-line" key={upload.id}>
+                            <div>
+                              <strong>{upload.original_filename}</strong>
+                              <span>
+                                {upload.content_type || "file"} · {fileSizeLabel(upload.size_bytes)} · {shortDate(upload.created_at)}
+                              </span>
+                            </div>
+                            <b>{upload.id}</b>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="detail-token">
+                    <span>Buyer upload token</span>
+                    <code>{orderDetail.order.upload_token}</code>
+                  </div>
                 </div>
               )}
             </div>

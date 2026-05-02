@@ -1553,3 +1553,191 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================
+   CUSTOMER CHECKOUT INFO FORM
+========================= */
+
+.checkout-customer-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.checkout-customer-form input,
+.checkout-customer-form textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 224, 160, 0.14);
+  border-radius: 15px;
+  padding: 12px 13px;
+  color: #fff8e7;
+  background: rgba(0, 0, 0, 0.38);
+  outline: none;
+}
+
+.checkout-customer-form textarea {
+  resize: vertical;
+  min-height: 82px;
+}
+
+.checkout-customer-form input:focus,
+.checkout-customer-form textarea:focus {
+  border-color: rgba(255, 215, 128, 0.44);
+  box-shadow: 0 0 0 4px rgba(255, 215, 128, 0.08);
+}
+
+.checkout-customer-row {
+  display: grid;
+  grid-template-columns: 1fr 0.7fr 0.7fr;
+  gap: 8px;
+}
+
+.buyer-upload-panel p + p {
+  margin-top: 8px;
+}
+
+@media (max-width: 620px) {
+  .checkout-customer-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================
+   OWNER ORDER DETAIL PANEL
+========================= */
+
+.order-actions {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.order-actions button,
+.order-detail-head button {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #160d02;
+  background: linear-gradient(135deg, #fff9dc 0%, #ffd979 42%, #bb842e 100%);
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.order-detail-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 226, 158, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 224, 160, 0.14);
+}
+
+.order-detail-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.order-detail-head h3 {
+  margin: 6px 0 0;
+  font-size: 21px;
+  letter-spacing: -0.045em;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.detail-grid > div,
+.detail-note,
+.detail-token {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.detail-grid span,
+.detail-note span,
+.detail-token span {
+  display: block;
+  margin-bottom: 6px;
+  color: rgba(255, 224, 160, 0.64);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.detail-grid strong {
+  display: block;
+  color: #fff8e7;
+  font-size: 13px;
+}
+
+.detail-grid p,
+.detail-note p {
+  margin: 4px 0 0;
+  color: rgba(255, 248, 231, 0.62);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.detail-section {
+  margin-top: 14px;
+}
+
+.detail-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.detail-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.detail-line strong {
+  display: block;
+  font-size: 13px;
+}
+
+.detail-line span {
+  display: block;
+  margin-top: 4px;
+  color: rgba(255, 248, 231, 0.52);
+  font-size: 11px;
+}
+
+.detail-line b {
+  color: #ffe2a0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.detail-token {
+  margin-top: 14px;
+}
+
+.detail-token code {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #baf7d5;
+  font-size: 11px;
+  line-height: 1.4;
+}
