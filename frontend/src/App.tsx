@@ -20,7 +20,7 @@ type Product = {
   image_url: string;
 };
 
-type ProductsResponse = {
+type ProductsResponse = { 
   ok: boolean;
   capacity?: number;
   products: Product[];
