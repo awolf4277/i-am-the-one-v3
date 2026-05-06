@@ -1,0 +1,27 @@
+I AM THE ONE™ Commerce System License
+
+Copyright © 2026 Andrew Wolverton. All Rights Reserved.
+
+Permission is granted to the purchaser or authorized recipient to install,
+configure, and operate this software package for one business, brand, storefront,
+or client installation.
+
+The purchaser may customize product data, images, colors, deployment settings,
+and business-facing content for their own authorized use.
+
+The purchaser may not resell, redistribute, publish, sublicense, repackage, or
+claim authorship of the original software package, system structure, visual
+design language, documentation, or included branding without written permission
+from Andrew Wolverton.
+
+I AM THE ONE™ and WOLF OS™ branding may not be removed from source notices,
+license files, or ownership documentation unless a separate white-label license
+has been granted in writing.
+
+This software is provided as-is, without warranty of any kind. The author is not
+responsible for business losses, data loss, payment issues, hosting outages,
+security incidents, or misuse of the software.
+
+For production use, the operator is responsible for configuring secure passwords,
+environment variables, hosting, backups, payment processing, privacy policies,
+tax handling, and legal compliance.

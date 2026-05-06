@@ -1,0 +1,13 @@
+I AM THE ONE™ Commerce System
+Powered by WOLF OS™
+
+Copyright © 2026 Andrew Wolverton. All Rights Reserved.
+
+This software package, visual styling, owner dashboard structure, branding language,
+documentation, and included source organization are provided as part of the
+I AM THE ONE™ Commerce System package.
+
+I AM THE ONE™ and WOLF OS™ are branding marks used by Andrew Wolverton.
+
+Unauthorized redistribution, resale, rebranding, or removal of ownership notices
+is not permitted unless separately licensed in writing by Andrew Wolverton.
